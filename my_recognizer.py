@@ -21,5 +21,11 @@ def recognize(models: dict, test_set: SinglesData):
     probabilities = []
     guesses = []
     # TODO implement the recognizer
+    # get index of
+    for i in test_set.get_all_Xlengths().keys():
+        x, lengths = test_set.get_item_Xlengths(i)
+
+
+
     # return probabilities, guesses
     raise NotImplementedError

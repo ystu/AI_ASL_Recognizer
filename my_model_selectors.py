@@ -46,7 +46,6 @@ class ModelSelector(object):
                 print("failure on {} with {} states".format(self.this_word, num_states))
             return None
 
-
 class SelectorConstant(ModelSelector):
     """ select the model with value self.n_constant
 
@@ -77,7 +76,37 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        n = len(self.lengths)
+        logN = np.log(n)
+        min_bic = float('inf')
+        best_model = None
+
+        for n_hidden_state in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                # model = self.base_model(n_hidden_state)
+                # logL = model.score(self.X, self.lengths)
+                model = GaussianHMM(n_components=n_hidden_state, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                logL = model.score(self.X, self.lengths)
+
+                # number of free parameter
+                p = n ** 2 + 2 * n_hidden_state * n - 1
+                bic = -2 * logL + p * logN
+
+                # check whether this model is better (smaller bic)
+                if bic < min_bic:
+                    min_bic = bic
+                    best_model = model
+            except:
+                continue
+
+        if best_model is not None:
+            return best_model
+        else:
+            return self.base_model(self.n_constant)
+
+
+
 
 
 class SelectorDIC(ModelSelector):
@@ -94,7 +123,38 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        max_dic = float('-inf')
+        M = len(self.words.keys()) # number of words
+        best_model = None
+
+        for n_hidden_state in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = GaussianHMM(n_components=n_hidden_state, covariance_type="diag", n_iter=1000,
+                                    random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                logLi = model.score(self.X, self.lengths)
+            except:
+                logLi = 0.0
+
+
+            # sum of log in each words
+            sumLogLi = 0.0
+            for word in self.hwords.keys():
+                X, lengths = self.hwords[word]
+                try:
+                    sumLogLi += model.score(X, lengths)
+                except:
+                    continue
+
+            # calculate DIC score
+            # DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
+            dscore = logLi - (1 - (M - 1)) * (sumLogLi - logLi)
+
+            # check whether it is better dic score
+            if dscore > max_dic:
+                max_dic = dscore
+                best_model = model
+
+        return best_model
 
 
 class SelectorCV(ModelSelector):
@@ -105,5 +165,65 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        # implement model selection using CV
+        max_mean_LogL = float('-inf')
+        best_hidden_state = 0
+        n_splits = min(3, len(self.lengths))
+        best_model = None
+
+        # search best hidden state
+        for n_hidden_state in range(self.min_n_components, self.max_n_components + 1):
+            sum_logL = 0.0
+            num_folds_done = 0
+
+            # core of cross validation
+            split_method = KFold(n_splits=n_splits)
+            for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                x, lengths = combine_sequences(cv_train_idx, self.sequences)
+                # model, logL = self.cv_model(n_hidden_state, x, lengths)
+                # model= self.base_model(n_hidden_state)
+                try:
+                    model = GaussianHMM(n_components=n_hidden_state, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(x, lengths)
+                    logL = model.score(x, lengths)
+                except:
+                    logL = 0.0
+
+                sum_logL += logL
+                num_folds_done += 1
+
+            # calculate mean LogL
+            if num_folds_done != 0:
+                mean_logL = sum_logL / num_folds_done
+            else:
+                mean_logL = float('-inf')
+
+            # check whether it is the best LogL
+            if mean_logL > max_mean_LogL:
+                max_mean_LogL = mean_logL
+                # best_hidden_state = n_hidden_state
+                best_model = model
+
+        # after check each n_state, return the best one
+        if best_hidden_state is not None:
+            return best_model
+        else:
+            # no best hidden state
+            return self.base_model(self.n_constant)
+
+    def cv_model(self, num_states, x, lengths):
+        # with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        # warnings.filterwarnings("ignore", category=RuntimeWarning)
+        try:
+            hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                    random_state=self.random_state, verbose=False).fit(x, lengths)
+            logL = hmm_model.score(x, lengths)
+
+            if self.verbose:
+                print("model created for {} with {} states".format(self.this_word, num_states))
+            return hmm_model, logL
+        except:
+            if self.verbose:
+                print("failure on {} with {} states".format(self.this_word, num_states))
+            return None, 0.0
