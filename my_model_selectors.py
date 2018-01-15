@@ -175,28 +175,37 @@ class SelectorCV(ModelSelector):
         for n_hidden_state in range(self.min_n_components, self.max_n_components + 1):
             sum_logL = 0.0
             num_folds_done = 0
-
-            # core of cross validation
-            split_method = KFold(n_splits=n_splits)
-            for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
-                x, lengths = combine_sequences(cv_train_idx, self.sequences)
-                # model, logL = self.cv_model(n_hidden_state, x, lengths)
-                # model= self.base_model(n_hidden_state)
+            mean_logL = float('-inf')
+            # some data only one split
+            if n_splits == 1:
                 try:
                     model = GaussianHMM(n_components=n_hidden_state, covariance_type="diag", n_iter=1000,
-                                        random_state=self.random_state, verbose=False).fit(x, lengths)
-                    logL = model.score(x, lengths)
+                                        random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                    logL = model.score(self.X, self.lengths)
                 except:
                     logL = 0.0
-
-                sum_logL += logL
-                num_folds_done += 1
-
-            # calculate mean LogL
-            if num_folds_done != 0:
-                mean_logL = sum_logL / num_folds_done
             else:
-                mean_logL = float('-inf')
+                # core of cross validation
+                split_method = KFold(n_splits=n_splits)
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    x, lengths = combine_sequences(cv_train_idx, self.sequences)
+                    # model, logL = self.cv_model(n_hidden_state, x, lengths)
+                    # model= self.base_model(n_hidden_state)
+                    try:
+                        model = GaussianHMM(n_components=n_hidden_state, covariance_type="diag", n_iter=1000,
+                                            random_state=self.random_state, verbose=False).fit(x, lengths)
+                        logL = model.score(x, lengths)
+                    except:
+                        logL = 0.0
+
+                    sum_logL += logL
+                    num_folds_done += 1
+
+                # calculate mean LogL
+                if num_folds_done != 0:
+                    mean_logL = sum_logL / num_folds_done
+                else:
+                    mean_logL = float('-inf')
 
             # check whether it is the best LogL
             if mean_logL > max_mean_LogL:
@@ -210,20 +219,3 @@ class SelectorCV(ModelSelector):
         else:
             # no best hidden state
             return self.base_model(self.n_constant)
-
-    def cv_model(self, num_states, x, lengths):
-        # with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-        # warnings.filterwarnings("ignore", category=RuntimeWarning)
-        try:
-            hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
-                                    random_state=self.random_state, verbose=False).fit(x, lengths)
-            logL = hmm_model.score(x, lengths)
-
-            if self.verbose:
-                print("model created for {} with {} states".format(self.this_word, num_states))
-            return hmm_model, logL
-        except:
-            if self.verbose:
-                print("failure on {} with {} states".format(self.this_word, num_states))
-            return None, 0.0
